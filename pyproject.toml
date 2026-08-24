@@ -1,0 +1,20 @@
+[project]
+name = "wohnungsjaeger3000"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Gelaechter", email = "30231932+gelaechter@users.noreply.github.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "googlemaps>=4.10.0",
+    "scrapling[fetchers]>=0.4.15",
+]
+
+[project.scripts]
+wohnungsjaeger3000 = "wohnungsjaeger3000:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
