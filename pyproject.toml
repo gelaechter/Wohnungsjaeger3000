@@ -2,13 +2,15 @@
 name = "wohnungsjaeger3000"
 version = "0.1.0"
 description = "Add your description here"
-readme = "README.md"
 authors = [
     { name = "Gelaechter", email = "30231932+gelaechter@users.noreply.github.com" }
 ]
 requires-python = ">=3.13"
 dependencies = [
     "googlemaps>=4.10.0",
+    "patchright>=1.62.1",
+    "pillow>=12.3.0",
+    "pillow-avif-plugin>=1.6.0",
     "scrapling[fetchers]>=0.4.15",
 ]
 
