@@ -4,3 +4,9 @@ services:
     container_name: wohnungsjaeger3000
     volumes:
       - ./output:/app/output
+      - crawl_data:/app/crawl_data
+    environment:
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
+
+volumes:
+  crawl_data:

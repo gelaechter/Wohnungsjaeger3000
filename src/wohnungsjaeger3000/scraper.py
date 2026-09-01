@@ -1,13 +1,18 @@
-import io
 import re
 from datetime import datetime, date, timedelta
 from os.path import basename
-from pathlib import Path
+from pprint import pformat
+from typing import Any
 from urllib.parse import urlparse
 
-import googlemaps
-from PIL import Image
+from scrapling.engines._browsers._stealth import AsyncStealthySession
+from scrapling.engines.static import FetcherSession
 from scrapling.spiders import Spider, Response
+
+from wohnungsjaeger3000.ai import ask_mistral
+from wohnungsjaeger3000.db import already_seen, add_to_seen
+from wohnungsjaeger3000.gmaps import fetch_transit_time
+from wohnungsjaeger3000.notify import send_notification
 
 
 def parse_datetime(date_str: str) -> datetime:
@@ -47,56 +52,56 @@ def get_last_path(url: str) -> str:
     """
     https://gnu.org/what/is/a/man
         -> man
-    https://fvcxljnn/image.jpg
+    https://fvcxljnn.com/image.jpg
         -> image.jpg
     """
     return basename(urlparse(url).path.rstrip("/"))
 
 
-# Stolen key :P
-# https://support.google.com/maps/thread/19784143/5-avenue-de-breteuil-paris-wrong-geoloc?hl=en
-gmaps = googlemaps.Client(key='AIzaSyD-1hpguJ8TzcL6V5DJ807Z1u8U-GdSEEQ')
-
-
-def fetch_transit_time(lat: float, long: float) -> dict[str, int]:
-    """
-    Fetches the transit time from lat/long to the RUB both by ÖPNV and by car
-    """
-
-    # Coming monday at 07:30
-    now = datetime.now()
-    monday_730 = (now + timedelta(days=7 - now.weekday())).replace(
-        hour=7, minute=30, second=0, microsecond=0
+def weigh_and_notify(data: Any, images: list[str]) -> dict[str, Any]:
+    response = ask_mistral(
+        prompt=pformat(data),
+        image_urls=images
     )
-
-    directions_opnv = gmaps.distance_matrix(f"{lat}, {long}",
-                                            "Ruhr-Universität Bochum",
-                                            mode="transit",
-                                            departure_time=monday_730)
-
-    directions_car = gmaps.distance_matrix(f"{lat}, {long}",
-                                           "Ruhr-Universität Bochum",
-                                           mode="driving",
-                                           departure_time=monday_730)
-
-    return {
-        "minutes_by_opnv": directions_opnv["rows"][0]["elements"][0]["duration"]["value"] // 60,
-        "minutes_by_car": directions_car["rows"][0]["elements"][0]["duration"]["value"] // 60,
-    }
+    if response["benachrichtigen"]:
+        send_notification(data["Url"], response["nachricht"])
+    return response
 
 
 class WohnungsSpider(Spider):
     name = "Wohnungen"
-    # Sucht Wohnungen in Bochum (+30km) bis 500€
-    start_urls = ["https://www.kleinanzeigen.de/s-bochum/preis::500/wohnung/k0l1932r30"]
+    # Sucht Wohnungen (gebote) in Bochum (+30km) bis 500€
+    start_urls = ["https://www.kleinanzeigen.de/s-bochum/anzeige:angebote/preis::500/wohnung/k0l1932r30"]
     concurrent_requests = 3
     autothrottle_enabled = True
+
+    def configure_sessions(self, manager):
+        # Fast HTTP for listing pages (default)
+        manager.add("http", FetcherSession())
+
+        # Stealth browser so we don't get fucked by bot detection
+        # Additionally await fully loading the anzeige
+        manager.add("anzeige", AsyncStealthySession(
+            headless=True,
+            network_idle=True,
+            capture_xhr=r"https://www\.kleinanzeigen\.de/s-anzeige/.*",
+            wait_selector="#viewad-description-text",
+            wait_selector_state="visible"
+        ))
 
     async def parse(self, response: Response):
         # Find all Anzeigen on the page
         for anzeige in response.find_all("article"):
             data = {}
             anzeigen_url = anzeige.attrib["data-href"]
+            id = get_last_path(anzeigen_url)
+
+            # Skip already seen Anzeigen
+            if already_seen(id):
+                print("Seen; Suche abgeschlossen")
+                return
+            else:
+                add_to_seen(id)
 
             # Set date
             date_element = anzeige.css('svg[data-title="calendarOutline"] + span').get()
@@ -104,28 +109,26 @@ class WohnungsSpider(Spider):
             if date_element is not None:
                 data["Eingestellt am"] = parse_datetime(date_element).isoformat(sep=" ")
             # Follow the anzeige and parse it
-            yield response.follow(anzeigen_url, callback=self.parse_anzeige, meta={"data": data})
+            yield response.follow(anzeigen_url, callback=self.parse_anzeige, meta={"data": data}, sid="anzeige")
 
         # Finally go to the next page
-        # naechste_seite = response.css('a[title="Nächste"]').attrib["href"]
-        # yield response.follow(naechste_seite)
+        naechste_seite = response.css('a[title="Nächste"]')[0].attrib["href"]
+        yield response.follow(naechste_seite)
 
     async def parse_anzeige(self, response: Response):
         data = response.meta["data"]
+        images = []
 
         # Set url
         url = response.url
         data["Url"] = url
 
-        # Set id
-        data["Id"] = get_last_path(url)
-
         # Download images
-        for bild in response.css(".galleryimage-element img"):
+        for bild in response.css("#viewad-image"):
             bild_url = bild.attrib["src"]
             max_res_url = image_max_url(bild_url)
-            # Follow the image to download it
-            yield response.follow(max_res_url, callback=self.download_image, meta={"id": data["Id"]})
+            print(max_res_url)
+            images.append(max_res_url)
 
         # Set title
         data["Titel"] = response.css("#viewad-title")[0].get_all_text(ignore_tags=("span",)).clean()
@@ -158,25 +161,19 @@ class WohnungsSpider(Spider):
 
         # Fetch transit time
         transit_calc = fetch_transit_time(lat, long)
-        data["time_by_opnv"] = transit_calc["minutes_by_opnv"]
-        data["time_by_car"] = transit_calc["minutes_by_car"]
+        data["Minuten mit ÖPNV"] = transit_calc["minutes_by_opnv"]
+        data["Minuten mit Auto"] = transit_calc["minutes_by_car"]
+        data["Minuten mit Fahhrad"] = transit_calc["minutes_by_bike"]
 
+        # Let AI check the data and notify me
+        response = weigh_and_notify(data, [])
+        data["Benachrichtigt"] = response["benachrichtigen"]
+        data["Begründung"] = response["nachricht"]
         yield data
-
-    async def download_image(self, response: Response):
-        anzeigen_id = response.meta["id"]
-        filename = get_last_path(response.url)
-        # Determine output folder
-        output_folder = Path("./output/images") / anzeigen_id
-        output_folder.mkdir(parents=True, exist_ok=True)
-        # Convert and write image
-        with Image.open(io.BytesIO(response.body)) as image:
-            image.convert("RGB").save(output_folder / f"{filename}.jpeg", "JPEG")
-
-        yield None
 
 
 def scrape_data():
     result = WohnungsSpider().start()
     print(f"Scraped {len(result.items)} Wohnungen")
-    result.items.to_csv("./output/wohnungen.csv")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    result.items.to_csv(f"./output/wohnungen_{timestamp}.csv")

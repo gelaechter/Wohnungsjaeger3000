@@ -29,8 +29,17 @@ RUN patchright install --with-deps
 
 # Application source changes only invalidate layers below this point
 COPY src/ ./src/
+RUN mkdir -p /app/crawl_data
 
 # Install the local project, if your pyproject.toml defines one
 RUN uv sync --locked
 
-CMD ["uv", "run", "wohnungsjaeger3000"]
+# Run the application every five minutes.
+# The cron format includes: minute hour day-of-month month day-of-week user command
+RUN printf '%s\n' \
+    '*/5 * * * * root cd /app && /app/.venv/bin/wohnungsjaeger3000 >> /proc/1/fd/1 2>> /proc/1/fd/2' \
+    > /etc/cron.d/wohnungsjaeger \
+    && chmod 0644 /etc/cron.d/wohnungsjaeger
+
+# Keep cron running as the container's foreground process
+CMD ["cron", "-f"]
