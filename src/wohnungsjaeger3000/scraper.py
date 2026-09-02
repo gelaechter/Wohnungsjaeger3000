@@ -31,7 +31,7 @@ def parse_datetime(date_str: str) -> datetime:
             return datetime.combine(yesterday, time_part)
         # Raw date
         case _:
-            return datetime.strptime("18.01.2026", "%d.%m.%Y")
+            return datetime.strptime(value, "%d.%m.%Y")
 
 
 def image_max_url(url: str) -> str:
@@ -63,7 +63,7 @@ def get_last_path(url: str) -> str:
 def weigh_and_notify(data: Any, images: list[str]) -> dict[str, Any]:
     response = ask_mistral(
         prompt=pformat(data),
-        image_urls=images
+        image_urls=[], # Don't send any images to the AI, they're expensive
     )
     if response["benachrichtigen"]:
         send_notification(data["Url"], response["nachricht"], images=images)
@@ -77,28 +77,6 @@ class WohnungsSpider(Spider):
     concurrent_requests = 3
     autothrottle_enabled = True
 
-    async def wait_for_description(self, page: Page):
-        await page.wait_for_function(dedent("""\
-                                        () => {
-                                            const el = document.querySelector('#viewad-description-text');
-                                            return el && el.innerText.trim().length > 0;
-                                        }
-                                    """),
-                                     polling=1000)
-
-    def configure_sessions(self, manager):
-        # Fast HTTP for listing pages (default)
-        manager.add("http", FetcherSession())
-
-        # Stealth browser so we don't get fucked by bot detection
-        # Additionally await fully loading the description
-        manager.add("anzeige", AsyncStealthySession(
-            headless=True,
-            network_idle=True,
-            capture_xhr=r"https://www\.kleinanzeigen\.de/s-anzeige/.*",
-            page_action=self.wait_for_description
-        ))
-
     async def parse(self, response: Response):
         # Find all Anzeigen on the page
         for anzeige in response.find_all("article"):
@@ -108,7 +86,6 @@ class WohnungsSpider(Spider):
 
             # Skip already seen Anzeigen
             if already_seen(id):
-                self.logger.info(f"Skipping Anzeige: {id}")
                 continue
 
             # Set date
@@ -170,7 +147,7 @@ class WohnungsSpider(Spider):
         data["Minuten mit Fahhrad"] = transit_calc["minutes_by_bike"]
 
         # Let AI check the data and notify me
-        response = weigh_and_notify(data, [])
+        response = weigh_and_notify(data, images)
         data["Benachrichtigt"] = response["benachrichtigen"]
         data["Begründung"] = response["nachricht"]
         yield data
