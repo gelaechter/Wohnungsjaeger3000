@@ -2,9 +2,11 @@ import re
 from datetime import datetime, date, timedelta
 from os.path import basename
 from pprint import pformat
+from textwrap import dedent
 from typing import Any
 from urllib.parse import urlparse
 
+from patchright.async_api import Page
 from scrapling.engines._browsers._stealth import AsyncStealthySession
 from scrapling.engines.static import FetcherSession
 from scrapling.spiders import Spider, Response
@@ -64,7 +66,7 @@ def weigh_and_notify(data: Any, images: list[str]) -> dict[str, Any]:
         image_urls=images
     )
     if response["benachrichtigen"]:
-        send_notification(data["Url"], response["nachricht"])
+        send_notification(data["Url"], response["nachricht"], images=images)
     return response
 
 
@@ -75,18 +77,26 @@ class WohnungsSpider(Spider):
     concurrent_requests = 3
     autothrottle_enabled = True
 
+    async def wait_for_description(self, page: Page):
+        await page.wait_for_function(dedent("""\
+                                        () => {
+                                            const el = document.querySelector('#viewad-description-text');
+                                            return el && el.innerText.trim().length > 0;
+                                        }
+                                    """),
+                                     polling=1000)
+
     def configure_sessions(self, manager):
         # Fast HTTP for listing pages (default)
         manager.add("http", FetcherSession())
 
         # Stealth browser so we don't get fucked by bot detection
-        # Additionally await fully loading the anzeige
+        # Additionally await fully loading the description
         manager.add("anzeige", AsyncStealthySession(
             headless=True,
             network_idle=True,
             capture_xhr=r"https://www\.kleinanzeigen\.de/s-anzeige/.*",
-            wait_selector="#viewad-description-text",
-            wait_selector_state="visible"
+            page_action=self.wait_for_description
         ))
 
     async def parse(self, response: Response):
@@ -98,22 +108,17 @@ class WohnungsSpider(Spider):
 
             # Skip already seen Anzeigen
             if already_seen(id):
-                print("Seen; Suche abgeschlossen")
-                return
-            else:
-                add_to_seen(id)
+                self.logger.info(f"Skipping Anzeige: {id}")
+                continue
 
             # Set date
-            date_element = anzeige.css('svg[data-title="calendarOutline"] + span').get()
+            date_element = anzeige.css('svg[data-title="calendarOutline"] + span')[0].get_all_text().clean()
 
             if date_element is not None:
                 data["Eingestellt am"] = parse_datetime(date_element).isoformat(sep=" ")
             # Follow the anzeige and parse it
-            yield response.follow(anzeigen_url, callback=self.parse_anzeige, meta={"data": data}, sid="anzeige")
-
-        # Finally go to the next page
-        naechste_seite = response.css('a[title="Nächste"]')[0].attrib["href"]
-        yield response.follow(naechste_seite)
+            yield response.follow(anzeigen_url, callback=self.parse_anzeige, meta={"data": data})
+            add_to_seen(id)
 
     async def parse_anzeige(self, response: Response):
         data = response.meta["data"]
@@ -127,7 +132,6 @@ class WohnungsSpider(Spider):
         for bild in response.css("#viewad-image"):
             bild_url = bild.attrib["src"]
             max_res_url = image_max_url(bild_url)
-            print(max_res_url)
             images.append(max_res_url)
 
         # Set title

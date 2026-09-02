@@ -1,12 +1,12 @@
 services:
   app:
-    build: .
+    image: wohnungsjaeger3000:latest
     container_name: wohnungsjaeger3000
     volumes:
       - ./output:/app/output
       - crawl_data:/app/crawl_data
     environment:
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:?Register one at Mistral Studio https://mistral.ai/products/studio/"}
 
 volumes:
   crawl_data:

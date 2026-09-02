@@ -10,8 +10,6 @@ dependencies = [
     "googlemaps>=4.10.0",
     "mistralai>=2.9.4",
     "patchright>=1.62.1",
-    "pillow>=12.3.0",
-    "pillow-avif-plugin>=1.6.0",
     "scrapling[fetchers]>=0.4.15",
     "sqlalchemy>=2.0.52",
 ]

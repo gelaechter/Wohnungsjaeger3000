@@ -28,16 +28,17 @@ from mistralai.client import Mistral
 
 MODEL = "mistral-medium-latest"  # vision-capable per the Model Selection Guide
 SYSTEM_PROMPT = (
-    "Du sollst dem Nutzer bei der Wohnungssuche in Bochum helfen."
-    "Über ihn:"
-    " - Er ist Student und will an der Ruhr-Universität-Bochum (RUB) studieren"
-    " - Er will dementsprechend nah an der RUB Wohnen"
-    "   - Am liebsten <= 30 Minuten mit dem Rad/ÖPNV"
-    " - Die Warmmiete sollte 600€ nicht überschreiten"
-    "   (hier muss aufgepasst werden weil die Inserate nicht umbedingt perfekte Angaben haben, prüfe also Nebenkosten etc.)"
-    ""
-    "Du erhälts strukturiertes JSON welches dir Informationen über eine Wohnung liefert."
-    "An diesen Informationen und den dazu gehörigen Bildern sollst du die Wohnung bewerten."
+    "Du sollst dem Nutzer bei der Wohnungssuche in Bochum helfen.\n"
+    "Über ihn:\n"
+    " - Er ist Student und will an der Ruhr-Universität-Bochum (RUB) studieren\n"
+    " - Er will dementsprechend nah an der RUB Wohnen\n"
+    "   - Am liebsten <= 30 Minuten mit dem Rad/ÖPNV\n"
+    "   - Oder aber <= 15 Minuten mit dem Auto\n"
+    " - Die Warmmiete sollte 600€ nicht überschreiten\n"
+    "   (hier muss aufgepasst werden weil die Inserate nicht umbedingt perfekte Angaben haben, prüfe also Nebenkosten etc.)\n"
+    "\n"
+    "Du erhälts strukturiertes JSON welches dir Informationen über eine Wohnung liefert.\n"
+    "An diesen Informationen sollst du die Wohnung bewerten.\n"
 )
 TEMPERATURE = 0.0  # deterministic
 MAX_TOKENS = 1024
@@ -93,7 +94,6 @@ def ask_mistral(prompt: str, image_urls: list[str]) -> dict[str, Any]:
         },
     )
 
-    pprint(response)
     return json.loads(response.choices[0].message.content)
 
 
