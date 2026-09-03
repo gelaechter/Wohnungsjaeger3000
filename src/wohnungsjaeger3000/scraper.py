@@ -2,12 +2,9 @@ import re
 from datetime import datetime, date, timedelta
 from os.path import basename
 from pprint import pformat
-from textwrap import dedent
 from typing import Any
 from urllib.parse import urlparse
 
-from patchright.async_api import Page
-from scrapling.engines._browsers._stealth import AsyncStealthySession
 from scrapling.engines.static import FetcherSession
 from scrapling.spiders import Spider, Response
 
@@ -63,7 +60,7 @@ def get_last_path(url: str) -> str:
 def weigh_and_notify(data: Any, images: list[str]) -> dict[str, Any]:
     response = ask_mistral(
         prompt=pformat(data),
-        image_urls=[], # Don't send any images to the AI, they're expensive
+        image_urls=[],  # Don't send any images to the AI, they're expensive
     )
     if response["benachrichtigen"]:
         send_notification(data["Url"], response["nachricht"], images=images)
@@ -76,6 +73,18 @@ class WohnungsSpider(Spider):
     start_urls = ["https://www.kleinanzeigen.de/s-bochum/anzeige:angebote/preis::500/wohnung/k0l1932r30"]
     concurrent_requests = 3
     autothrottle_enabled = True
+
+    def configure_sessions(self, manager):
+        manager.add(
+            "http",
+            FetcherSession(
+                headers={
+                    "User-Agent": "curl/8.0",
+                    "Accept": "*/*",
+                    "Accept-Encoding": "gzip",
+                }
+            ),
+        )
 
     async def parse(self, response: Response):
         # Find all Anzeigen on the page
